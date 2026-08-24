@@ -1,10 +1,9 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
-import { createRequire } from 'node:module'
+
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { exec } from 'node:child_process'
 
-const require = createRequire(import.meta.url)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // The built directory structure
@@ -98,11 +97,11 @@ app.whenReady().then(() => {
     });
   })
 
-  ipcMain.handle('open-report', async (event, reportPath) => {
+  ipcMain.handle('open-report', async (_event, reportPath) => {
     try {
       await shell.openPath(reportPath);
       return { success: true };
-    } catch (err) {
+    } catch (err: any) {
       return { error: err.message };
     }
   })
