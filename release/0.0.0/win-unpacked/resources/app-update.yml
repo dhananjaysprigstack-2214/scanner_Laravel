@@ -1,0 +1,4 @@
+owner: dhananjaysprigstack-2214
+repo: scanner_Laravel
+provider: github
+updaterCacheDirName: laravel-scanner-updater
