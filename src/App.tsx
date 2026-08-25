@@ -5,29 +5,39 @@ function App() {
   const [output, setOutput] = useState<string>('')
   const [isScanning, setIsScanning] = useState<boolean>(false)
   const [reportContent, setReportContent] = useState<string | null>(null)
-  const [file, setFile] = useState<File | null>(null)
+  const [files, setFiles] = useState<FileList | null>(null)
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFolderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      setFile(e.target.files[0])
+      setFiles(e.target.files)
     }
   }
 
   const handleScan = async () => {
-    if (!file) {
-      setOutput('Please select a .zip file first.')
+    if (!files || files.length === 0) {
+      setOutput('Please select a folder first.')
       return
     }
 
     setIsScanning(true)
-    setOutput('Uploading and scanning... This may take a moment.')
+    setOutput(`Uploading ${files.length} files... This might take a while for large folders.`)
     setReportContent(null)
 
     const formData = new FormData()
-    formData.append('projectZip', file)
+    
+    // Append all files with their relative paths
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      // Skip node_modules and vendor to prevent browser/server crashing
+      if (file.webkitRelativePath.includes('/node_modules/') || file.webkitRelativePath.includes('/vendor/')) {
+        continue
+      }
+      formData.append('projectFiles', file)
+      formData.append('paths', file.webkitRelativePath)
+    }
 
     try {
-      const response = await fetch('/api/scan', {
+      const response = await fetch('/api/scan-folder', {
         method: 'POST',
         body: formData,
       })
@@ -62,13 +72,16 @@ function App() {
   return (
     <div style={{ padding: '2rem', fontFamily: 'system-ui, sans-serif', textAlign: 'center' }}>
       <h1 style={{ color: '#60a5fa' }}>Laravel Build Checker</h1>
-      <p style={{ color: '#94a3b8' }}>Upload a `.zip` of your Laravel project folder to scan for vulnerabilities and build issues.</p>
+      <p style={{ color: '#94a3b8' }}>Select your Laravel project folder to scan for vulnerabilities and build issues.</p>
       
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px', marginBottom: '20px' }}>
         <input 
           type="file" 
-          accept=".zip" 
-          onChange={handleFileChange}
+          // @ts-ignore
+          webkitdirectory="true"
+          directory="true"
+          multiple
+          onChange={handleFolderChange}
           disabled={isScanning}
           style={{ padding: '10px', background: '#1e293b', color: 'white', borderRadius: '6px' }}
         />
@@ -76,19 +89,19 @@ function App() {
         <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
           <button 
             onClick={handleScan}
-            disabled={isScanning || !file}
+            disabled={isScanning || !files}
             style={{
-              background: (isScanning || !file) ? '#475569' : '#3b82f6',
+              background: (isScanning || !files) ? '#475569' : '#3b82f6',
               color: 'white',
               border: 'none',
               padding: '10px 20px',
               borderRadius: '6px',
               fontSize: '16px',
-              cursor: (isScanning || !file) ? 'not-allowed' : 'pointer',
+              cursor: (isScanning || !files) ? 'not-allowed' : 'pointer',
               fontWeight: 'bold'
             }}
           >
-            {isScanning ? 'Scanning...' : 'Upload & Scan'}
+            {isScanning ? 'Scanning...' : 'Upload Folder & Scan'}
           </button>
 
           {reportContent && !isScanning && (
