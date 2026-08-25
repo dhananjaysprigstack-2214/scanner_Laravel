@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import { flushSync } from 'react-dom'
 import './App.css'
 
 function App() {
@@ -11,10 +12,15 @@ function App() {
   const handleFolderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const selectedFiles = e.target.files
-      setFiles(selectedFiles)
-      setIsScanning(true)
+      
+      // Force React to update the UI instantly before blocking the main thread
+      flushSync(() => {
+        setFiles(selectedFiles)
+        setIsScanning(true)
+        setOutput(`Scanning ${selectedFiles.length} files... Please wait.`)
+      })
 
-      // Delay execution to allow React to render the "Scanning folder..." UI first
+      // Give browser time to paint the UI before we freeze it with heavy loops
       setTimeout(() => {
         handleScan(selectedFiles)
       }, 100)
@@ -22,50 +28,70 @@ function App() {
   }
 
   const handleScan = async (selectedFiles: FileList) => {
-    setOutput(`Scanning ${selectedFiles.length} files... Please wait.`)
-
     setReportPath(null)
 
     try {
-      // 1. Calculate the absolute path of the root folder (works in Electron)
-      // @ts-ignore - 'path' exists on File in Electron
+      // @ts-ignore - Check if we are in Electron and have an absolute path
       const absPath = selectedFiles[0].path;
-      if (!absPath) {
-        throw new Error("Cannot get absolute path. Make sure you are running the app in Electron.");
-      }
+      // @ts-ignore
+      const isElectron = !!(window.ipcRenderer && absPath);
 
-      const relPath = selectedFiles[0].webkitRelativePath;
+      if (isElectron) {
+        // --- ELECTRON LOGIC (Instant, no upload limits) ---
+        const relPath = selectedFiles[0].webkitRelativePath;
+        const normalizedAbsPath = absPath.replace(/\\/g, '/');
+        const relParts = relPath.split('/');
+        const insidePath = relParts.slice(1).join('/'); 
+        
+        let rootFolderPath = normalizedAbsPath;
+        if (insidePath && rootFolderPath.endsWith(insidePath)) {
+            rootFolderPath = rootFolderPath.slice(0, -(insidePath.length + 1));
+        }
+        if (absPath.includes('\\')) {
+            rootFolderPath = rootFolderPath.replace(/\//g, '\\');
+        }
 
-      const normalizedAbsPath = absPath.replace(/\\/g, '/');
-      const relParts = relPath.split('/');
+        // @ts-ignore
+        const result = await window.ipcRenderer.invoke('scan-specific-folder', rootFolderPath)
 
-      // The part of the path inside the root folder
-      const insidePath = relParts.slice(1).join('/');
+        if (result.error) throw new Error(result.error)
 
-      let rootFolderPath = normalizedAbsPath;
-      if (insidePath && rootFolderPath.endsWith(insidePath)) {
-        // Slice off the insidePath and the trailing slash
-        rootFolderPath = rootFolderPath.slice(0, -(insidePath.length + 1));
-      }
+        let newOutput = `Scanning: ${result.folder}\n\n${result.output || ''}`
+        setOutput(newOutput)
+        if (result.reportPath) setReportPath(result.reportPath)
 
-      // Restore Windows backslashes if needed
-      if (absPath.includes('\\')) {
-        rootFolderPath = rootFolderPath.replace(/\//g, '\\');
-      }
+      } else {
+        // --- WEB BROWSER LOGIC ("In the live") ---
+        const formData = new FormData()
 
-      // @ts-ignore - ipcRenderer is exposed via preload
-      const result = await window.ipcRenderer.invoke('scan-specific-folder', rootFolderPath)
+        for (let i = 0; i < selectedFiles.length; i++) {
+          const file = selectedFiles[i]
+          if (file.webkitRelativePath.includes('/node_modules/') || file.webkitRelativePath.includes('/vendor/')) {
+            continue
+          }
+          formData.append('projectFiles', file)
+          formData.append('paths', file.webkitRelativePath)
+        }
 
-      if (result.error) {
-        throw new Error(result.error)
-      }
+        const response = await fetch('/api/scan-folder', {
+          method: 'POST',
+          body: formData,
+        })
 
-      let newOutput = `Scanning: ${result.folder}\n\n`
-      if (result.output) newOutput += result.output
+        const text = await response.text()
+        let result;
+        try {
+          result = JSON.parse(text)
+        } catch (parseErr) {
+          throw new Error(`Server returned invalid JSON (Status ${response.status}). The uploaded folder might be too large. Response snippet: ${text.substring(0, 150)}`)
+        }
 
-      setOutput(newOutput)
-      if (result.reportPath) {
-        setReportPath(result.reportPath)
+        if (!response.ok) throw new Error(result.error || 'Server error')
+
+        let newOutput = `Scanning: ${result.folder}\n\n${result.output || ''}`
+        if (result.error) newOutput += `\n[ERRORS]\n${result.error}`
+
+        setOutput(newOutput)
       }
     } catch (err: any) {
       setOutput(`Error invoking scanner: ${err.message}`)
@@ -77,13 +103,17 @@ function App() {
   const handleOpenReport = async () => {
     if (reportPath) {
       // @ts-ignore
-      await window.ipcRenderer.invoke('open-report', reportPath)
+      if (window.ipcRenderer) {
+        // @ts-ignore
+        await window.ipcRenderer.invoke('open-report', reportPath)
+      } else {
+        alert("Report viewing is only fully supported in the desktop app directly. In the web version, please view the report via the backend.")
+      }
     }
   }
 
   const resetScan = () => {
     setFiles(null)
-
     setReportPath(null)
     setOutput('')
     if (inputRef.current) {
@@ -95,7 +125,7 @@ function App() {
     <div style={{ padding: '2rem', fontFamily: 'system-ui, sans-serif', textAlign: 'center' }}>
       <h1 style={{ color: '#60a5fa' }}>Laravel Build Checker</h1>
       <p style={{ color: '#94a3b8' }}>Select your Laravel project folder to scan for errors and build issues.</p>
-
+      
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px', marginBottom: '20px' }}>
         {!files && !isScanning && !reportPath && (
           <input
@@ -131,7 +161,7 @@ function App() {
                 fontWeight: 'bold'
               }}
             >
-              🌐 Open Report in Browser
+              🌐 Open Report
             </button>
 
             <button
