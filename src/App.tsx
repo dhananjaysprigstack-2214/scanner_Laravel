@@ -4,7 +4,6 @@ import './App.css'
 function App() {
   const [output, setOutput] = useState<string>('')
   const [isScanning, setIsScanning] = useState<boolean>(false)
-  const [reportContent, setReportContent] = useState<string | null>(null)
   const [reportPath, setReportPath] = useState<string | null>(null)
   const [files, setFiles] = useState<FileList | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -18,13 +17,13 @@ function App() {
       // Delay execution to allow React to render the "Scanning folder..." UI first
       setTimeout(() => {
         handleScan(selectedFiles)
-      }, 10)
+      }, 100)
     }
   }
 
   const handleScan = async (selectedFiles: FileList) => {
     setOutput(`Scanning ${selectedFiles.length} files... Please wait.`)
-    setReportContent(null)
+
     setReportPath(null)
 
     try {
@@ -36,22 +35,22 @@ function App() {
       }
 
       const relPath = selectedFiles[0].webkitRelativePath;
-      
+
       const normalizedAbsPath = absPath.replace(/\\/g, '/');
       const relParts = relPath.split('/');
-      
+
       // The part of the path inside the root folder
-      const insidePath = relParts.slice(1).join('/'); 
-      
+      const insidePath = relParts.slice(1).join('/');
+
       let rootFolderPath = normalizedAbsPath;
       if (insidePath && rootFolderPath.endsWith(insidePath)) {
-          // Slice off the insidePath and the trailing slash
-          rootFolderPath = rootFolderPath.slice(0, -(insidePath.length + 1));
+        // Slice off the insidePath and the trailing slash
+        rootFolderPath = rootFolderPath.slice(0, -(insidePath.length + 1));
       }
 
       // Restore Windows backslashes if needed
       if (absPath.includes('\\')) {
-          rootFolderPath = rootFolderPath.replace(/\//g, '\\');
+        rootFolderPath = rootFolderPath.replace(/\//g, '\\');
       }
 
       // @ts-ignore - ipcRenderer is exposed via preload
@@ -84,7 +83,7 @@ function App() {
 
   const resetScan = () => {
     setFiles(null)
-    setReportContent(null)
+
     setReportPath(null)
     setOutput('')
     if (inputRef.current) {
