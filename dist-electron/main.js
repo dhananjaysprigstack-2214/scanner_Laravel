@@ -1,66 +1,87 @@
-import { app as i, BrowserWindow as u, ipcMain as h, dialog as _, shell as v } from "electron";
-import { fileURLToPath as R } from "node:url";
-import n from "node:path";
-import { exec as T } from "node:child_process";
-const f = n.dirname(R(import.meta.url));
-process.env.APP_ROOT = n.join(f, "..");
-const a = process.env.VITE_DEV_SERVER_URL, L = n.join(process.env.APP_ROOT, "dist-electron"), m = n.join(process.env.APP_ROOT, "dist");
-process.env.VITE_PUBLIC = a ? n.join(process.env.APP_ROOT, "public") : m;
-let e;
-function w() {
-  e = new u({
+import { app, BrowserWindow, ipcMain, dialog, shell } from "electron";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import { exec } from "node:child_process";
+const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
+process.env.APP_ROOT = path.join(__dirname$1, "..");
+const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
+const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
+const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
+let win;
+function createWindow() {
+  win = new BrowserWindow({
     width: 900,
     height: 700,
     title: "Laravel Build Checker",
-    icon: n.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
+    icon: path.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
     webPreferences: {
-      preload: n.join(f, "preload.mjs"),
-      contextIsolation: !0,
-      nodeIntegration: !1
+      preload: path.join(__dirname$1, "preload.mjs"),
+      contextIsolation: true,
+      nodeIntegration: false
     }
-  }), e.webContents.on("did-finish-load", () => {
-    e == null || e.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
-  }), a ? e.loadURL(a) : e.loadFile(n.join(m, "index.html"));
+  });
+  win.webContents.on("did-finish-load", () => {
+    win == null ? void 0 : win.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
+  });
+  if (VITE_DEV_SERVER_URL) {
+    win.loadURL(VITE_DEV_SERVER_URL);
+  } else {
+    win.loadFile(path.join(RENDERER_DIST, "index.html"));
+  }
 }
-i.on("window-all-closed", () => {
-  process.platform !== "darwin" && (i.quit(), e = null);
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
+    win = null;
+  }
 });
-i.on("activate", () => {
-  u.getAllWindows().length === 0 && w();
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
 });
-i.whenReady().then(() => {
-  w(), h.handle("scan-folder", async () => {
-    if (!e) return { error: "No window found" };
-    const t = await _.showOpenDialog(e, {
+app.whenReady().then(() => {
+  createWindow();
+  ipcMain.handle("scan-folder", async () => {
+    if (!win) return { error: "No window found" };
+    const result = await dialog.showOpenDialog(win, {
       properties: ["openDirectory"]
     });
-    if (t.canceled || t.filePaths.length === 0)
-      return { canceled: !0 };
-    const o = t.filePaths[0], s = n.join(process.env.APP_ROOT, "scan.php");
-    return new Promise((P) => {
-      T(`php "${s}" "${o}"`, { maxBuffer: 1024 * 1024 * 50 }, (r, l, g) => {
-        let c = l ? l.replace(/\x1B\[[0-9;]*[mK]/g, "") : "", p = g || (r ? r.message : null), d = n.join(o, "LaravelBuildChecker_laravel", "report.html");
-        r && r.message.includes("stdout maxBuffer length exceeded") && (c = `The output is too large to display in this terminal window.
-
-However, a full HTML report has been generated! You can view it here:
-file:///` + d.replace(/\\/g, "/"), p = null), P({
-          folder: o,
-          output: c,
-          error: p,
-          reportPath: d
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true };
+    }
+    const folderPath = result.filePaths[0];
+    const scriptPath = path.join(process.env.APP_ROOT, "scan.php");
+    return new Promise((resolve) => {
+      exec(`php "${scriptPath}" "${folderPath}"`, { maxBuffer: 1024 * 1024 * 50 }, (error, stdout, stderr) => {
+        let cleanOutput = stdout ? stdout.replace(/\x1B\[[0-9;]*[mK]/g, "") : "";
+        let errorMsg = stderr || (error ? error.message : null);
+        let reportPath = path.join(folderPath, "LaravelBuildChecker_laravel", "report.html");
+        if (error && error.message.includes("stdout maxBuffer length exceeded")) {
+          cleanOutput = "The output is too large to display in this terminal window.\n\nHowever, a full HTML report has been generated! You can view it here:\nfile:///" + reportPath.replace(/\\/g, "/");
+          errorMsg = null;
+        }
+        resolve({
+          folder: folderPath,
+          output: cleanOutput,
+          error: errorMsg,
+          reportPath
         });
       });
     });
-  }), h.handle("open-report", async (t, o) => {
+  });
+  ipcMain.handle("open-report", async (_event, reportPath) => {
     try {
-      return await v.openPath(o), { success: !0 };
-    } catch (s) {
-      return { error: s.message };
+      await shell.openPath(reportPath);
+      return { success: true };
+    } catch (err) {
+      return { error: err.message };
     }
   });
 });
 export {
-  L as MAIN_DIST,
-  m as RENDERER_DIST,
-  a as VITE_DEV_SERVER_URL
+  MAIN_DIST,
+  RENDERER_DIST,
+  VITE_DEV_SERVER_URL
 };
