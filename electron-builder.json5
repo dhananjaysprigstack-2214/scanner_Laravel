@@ -11,6 +11,10 @@
     "dist",
     "dist-electron"
   ],
+  "extraResources": [
+    "scan.php",
+    "LaravelBuildChecker.php"
+  ],
   "mac": {
     "target": [
       "dmg"

@@ -71,7 +71,9 @@ app.whenReady().then(() => {
     }
 
     const folderPath = result.filePaths[0];
-    const scriptPath = path.join(process.env.APP_ROOT, 'scan.php');
+    const scriptPath = app.isPackaged 
+      ? path.join(process.resourcesPath, 'scan.php') 
+      : path.join(process.env.APP_ROOT, 'scan.php');
 
     return new Promise((resolve) => {
       // Execute the PHP scanner script with a 50MB maxBuffer
