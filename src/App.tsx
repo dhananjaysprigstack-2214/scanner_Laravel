@@ -13,11 +13,21 @@ function App() {
     if (e.target.files && e.target.files.length > 0) {
       const selectedFiles = e.target.files
       
+      const foldersToScan = ['app', 'routes', 'config', 'database', 'resources'];
+      let relevantFileCount = 0;
+
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const parts = selectedFiles[i].webkitRelativePath.split('/');
+        if (foldersToScan.includes(parts[0]) || (parts.length > 1 && foldersToScan.includes(parts[1]))) {
+          relevantFileCount++;
+        }
+      }
+
       // Force React to update the UI instantly before blocking the main thread
       flushSync(() => {
         setFiles(selectedFiles)
         setIsScanning(true)
-        setOutput(`Scanning ${selectedFiles.length} files... Please wait.`)
+        setOutput(`Scanning ${relevantFileCount} files... Please wait.`)
       })
 
       // Give browser time to paint the UI before we freeze it with heavy loops
@@ -63,14 +73,17 @@ function App() {
       } else {
         // --- WEB BROWSER LOGIC ("In the live") ---
         const formData = new FormData()
+        const foldersToScan = ['app', 'routes', 'config', 'database', 'resources'];
 
         for (let i = 0; i < selectedFiles.length; i++) {
           const file = selectedFiles[i]
-          if (file.webkitRelativePath.includes('/node_modules/') || file.webkitRelativePath.includes('/vendor/')) {
-            continue
+          const parts = file.webkitRelativePath.split('/');
+          
+          // Only upload files in the targeted Laravel directories
+          if (foldersToScan.includes(parts[0]) || (parts.length > 1 && foldersToScan.includes(parts[1]))) {
+            formData.append('projectFiles', file)
+            formData.append('paths', file.webkitRelativePath)
           }
-          formData.append('projectFiles', file)
-          formData.append('paths', file.webkitRelativePath)
         }
 
         const response = await fetch('/api/scan-folder', {
