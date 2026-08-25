@@ -1,59 +1,73 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import './App.css'
 
 function App() {
   const [output, setOutput] = useState<string>('')
   const [isScanning, setIsScanning] = useState<boolean>(false)
   const [reportContent, setReportContent] = useState<string | null>(null)
+  const [reportPath, setReportPath] = useState<string | null>(null)
   const [files, setFiles] = useState<FileList | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const handleFolderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      setFiles(e.target.files)
+      const selectedFiles = e.target.files
+      setFiles(selectedFiles)
+      setIsScanning(true)
+
+      // Delay execution to allow React to render the "Scanning folder..." UI first
+      setTimeout(() => {
+        handleScan(selectedFiles)
+      }, 10)
     }
   }
 
-  const handleScan = async () => {
-    if (!files || files.length === 0) {
-      setOutput('Please select a folder first.')
-      return
-    }
-
-    setIsScanning(true)
-    setOutput(`Uploading ${files.length} files... This might take a while for large folders.`)
+  const handleScan = async (selectedFiles: FileList) => {
+    setOutput(`Scanning ${selectedFiles.length} files... Please wait.`)
     setReportContent(null)
-
-    const formData = new FormData()
-    
-    // Append all files with their relative paths
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]
-      // Skip node_modules and vendor to prevent browser/server crashing
-      if (file.webkitRelativePath.includes('/node_modules/') || file.webkitRelativePath.includes('/vendor/')) {
-        continue
-      }
-      formData.append('projectFiles', file)
-      formData.append('paths', file.webkitRelativePath)
-    }
+    setReportPath(null)
 
     try {
-      const response = await fetch('/api/scan-folder', {
-        method: 'POST',
-        body: formData,
-      })
+      // 1. Calculate the absolute path of the root folder (works in Electron)
+      // @ts-ignore - 'path' exists on File in Electron
+      const absPath = selectedFiles[0].path;
+      if (!absPath) {
+        throw new Error("Cannot get absolute path. Make sure you are running the app in Electron.");
+      }
 
-      const result = await response.json()
+      const relPath = selectedFiles[0].webkitRelativePath;
+      
+      const normalizedAbsPath = absPath.replace(/\\/g, '/');
+      const relParts = relPath.split('/');
+      
+      // The part of the path inside the root folder
+      const insidePath = relParts.slice(1).join('/'); 
+      
+      let rootFolderPath = normalizedAbsPath;
+      if (insidePath && rootFolderPath.endsWith(insidePath)) {
+          // Slice off the insidePath and the trailing slash
+          rootFolderPath = rootFolderPath.slice(0, -(insidePath.length + 1));
+      }
 
-      if (!response.ok) {
-        throw new Error(result.error || 'Server error')
+      // Restore Windows backslashes if needed
+      if (absPath.includes('\\')) {
+          rootFolderPath = rootFolderPath.replace(/\//g, '\\');
+      }
+
+      // @ts-ignore - ipcRenderer is exposed via preload
+      const result = await window.ipcRenderer.invoke('scan-specific-folder', rootFolderPath)
+
+      if (result.error) {
+        throw new Error(result.error)
       }
 
       let newOutput = `Scanning: ${result.folder}\n\n`
       if (result.output) newOutput += result.output
-      if (result.error) newOutput += `\n[ERRORS]\n${result.error}`
 
       setOutput(newOutput)
-      if (result.reportContent) setReportContent(result.reportContent)
+      if (result.reportPath) {
+        setReportPath(result.reportPath)
+      }
     } catch (err: any) {
       setOutput(`Error invoking scanner: ${err.message}`)
     } finally {
@@ -61,51 +75,51 @@ function App() {
     }
   }
 
-  const handleOpenReport = () => {
-    if (reportContent) {
-      const blob = new Blob([reportContent], { type: 'text/html' })
-      const url = URL.createObjectURL(blob)
-      window.open(url, '_blank')
+  const handleOpenReport = async () => {
+    if (reportPath) {
+      // @ts-ignore
+      await window.ipcRenderer.invoke('open-report', reportPath)
+    }
+  }
+
+  const resetScan = () => {
+    setFiles(null)
+    setReportContent(null)
+    setReportPath(null)
+    setOutput('')
+    if (inputRef.current) {
+      inputRef.current.value = ''
     }
   }
 
   return (
     <div style={{ padding: '2rem', fontFamily: 'system-ui, sans-serif', textAlign: 'center' }}>
       <h1 style={{ color: '#60a5fa' }}>Laravel Build Checker</h1>
-      <p style={{ color: '#94a3b8' }}>Select your Laravel project folder to scan for vulnerabilities and build issues.</p>
-      
+      <p style={{ color: '#94a3b8' }}>Select your Laravel project folder to scan for errors and build issues.</p>
+
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px', marginBottom: '20px' }}>
-        <input 
-          type="file" 
-          // @ts-ignore
-          webkitdirectory="true"
-          directory="true"
-          multiple
-          onChange={handleFolderChange}
-          disabled={isScanning}
-          style={{ padding: '10px', background: '#1e293b', color: 'white', borderRadius: '6px' }}
-        />
+        {!files && !isScanning && !reportPath && (
+          <input
+            type="file"
+            // @ts-ignore
+            webkitdirectory="true"
+            directory="true"
+            multiple
+            onChange={handleFolderChange}
+            ref={inputRef}
+            style={{ padding: '10px', background: '#1e293b', color: 'white', borderRadius: '6px', cursor: 'pointer' }}
+          />
+        )}
 
-        <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-          <button 
-            onClick={handleScan}
-            disabled={isScanning || !files}
-            style={{
-              background: (isScanning || !files) ? '#475569' : '#3b82f6',
-              color: 'white',
-              border: 'none',
-              padding: '10px 20px',
-              borderRadius: '6px',
-              fontSize: '16px',
-              cursor: (isScanning || !files) ? 'not-allowed' : 'pointer',
-              fontWeight: 'bold'
-            }}
-          >
-            {isScanning ? 'Scanning...' : 'Upload Folder & Scan'}
-          </button>
+        {isScanning && (
+          <div style={{ color: '#3b82f6', fontSize: '18px', fontWeight: 'bold', margin: '20px 0' }}>
+            ⏳ Scanning folder, please wait...
+          </div>
+        )}
 
-          {reportContent && !isScanning && (
-            <button 
+        {reportPath && !isScanning && (
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginTop: '10px' }}>
+            <button
               onClick={handleOpenReport}
               style={{
                 background: '#10b981',
@@ -118,10 +132,26 @@ function App() {
                 fontWeight: 'bold'
               }}
             >
-              🌐 View HTML Report
+              🌐 Open Report in Browser
             </button>
-          )}
-        </div>
+
+            <button
+              onClick={resetScan}
+              style={{
+                background: '#475569',
+                color: 'white',
+                border: 'none',
+                padding: '10px 20px',
+                borderRadius: '6px',
+                fontSize: '16px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+            >
+              Scan Another Folder
+            </button>
+          </div>
+        )}
       </div>
 
       <div style={{
@@ -135,7 +165,8 @@ function App() {
         overflowY: 'auto',
         maxHeight: '500px',
         border: '1px solid #334155',
-        textAlign: 'left'
+        textAlign: 'left',
+        marginTop: '20px'
       }}>
         {output || 'Output will appear here...'}
       </div>

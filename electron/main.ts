@@ -71,6 +71,14 @@ app.whenReady().then(() => {
     }
 
     const folderPath = result.filePaths[0];
+    return runScanner(folderPath);
+  })
+
+  ipcMain.handle('scan-specific-folder', async (_event, folderPath) => {
+    return runScanner(folderPath);
+  })
+
+  function runScanner(folderPath: string) {
     const scriptPath = app.isPackaged 
       ? path.join(process.resourcesPath, 'scan.php') 
       : path.join(process.env.APP_ROOT, 'scan.php');
@@ -97,7 +105,7 @@ app.whenReady().then(() => {
         });
       });
     });
-  })
+  }
 
   ipcMain.handle('open-report', async (_event, reportPath) => {
     try {
